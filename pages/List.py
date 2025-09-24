@@ -84,8 +84,8 @@ check_login()
 
 # --- Sidebar with User Info ---
 with st.sidebar:
-    st.title("📑 Influencer Checker")
-    st.divider()
+    #st.title("📑 Influencer Checker")
+    #st.divider()
     st.success(f"👋 Welcome, **{st.session_state.name}**")
     
     # Refresh button
