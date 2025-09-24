@@ -35,8 +35,7 @@ def init_session_state():
         "master_df": None,
         "current_file_hash": None,
         "show_preview": False,
-        "sheet_updated": False,
-        "active_tab": 0  # Add this to track active tab
+        "sheet_updated": False
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -245,325 +244,307 @@ if uploaded_file:
         st.session_state.unknown_df = unknown_df
         st.session_state.pending_df = pending_df
     
-    # Create tabs with persistent active tab state
-    tab_labels = [
+    # Display results using tabs for better organization - PENDING AS FIRST TAB
+    tab1, tab2, tab3 = st.tabs([
         f"🕒 Pending ({len(st.session_state.pending_df)})",
-        f"❌ Rejected ({len(st.session_state.rejected_df)})", 
+        f"❌ Rejected ({len(st.session_state.rejected_df)})",
         f"❓ Unknown ({len(st.session_state.unknown_df)})"
-    ]
+    ])
     
-    # Use a unique key for the tabs based on the file hash to maintain state per file
-    tab_key = f"main_tabs_{current_file_hash[:8]}"
-    
-    # Create tabs and get the selected tab index
-    tabs = st.tabs(tab_labels)
-    
-    # Update active tab based on which tab was clicked
-    for i, tab in enumerate(tabs):
-        if tab:
-            # This will set the active tab when user clicks on it
-            st.session_state.active_tab = i
-    
-    # Use the active tab from session state
-    active_tab = st.session_state.get('active_tab', 0)
-    
-    # Display content based on active tab
-    if active_tab == 0:  # Pending tab
-        with tabs[0]:
-            # Create display dataframe with formatted numbers
-            pending_display = st.session_state.pending_df.copy()
-            numeric_columns = ["Followers", "Post price", "Avg View", "CPV"]
-            for col in numeric_columns:
-                if col in pending_display.columns:
-                    pending_display[col] = pending_display[col].apply(format_number)
+    with tab1:
+        # Create display dataframe with formatted numbers
+        pending_display = st.session_state.pending_df.copy()
+        numeric_columns = ["Followers", "Post price", "Avg View", "CPV"]
+        for col in numeric_columns:
+            if col in pending_display.columns:
+                pending_display[col] = pending_display[col].apply(format_number)
+        
+        display_columns = ["ID", "Link", "Followers", "Category", "Post price", "Avg View", "CPV", "Select", "Compare"]
+        display_columns = [col for col in display_columns if col in pending_display.columns]
+        
+        pending_edited = st.data_editor(
+            pending_display[display_columns],
+            use_container_width=True,
+            column_config={
+                "Select": st.column_config.CheckboxColumn("Include in Export", default=True),
+                "Compare": st.column_config.CheckboxColumn("Compare History", default=False),
+                "Link": st.column_config.LinkColumn("Instagram Profile", display_text="View Profile")
+            },
+            key=f"pending_editor_{current_file_hash[:8]}",
+            hide_index=True
+        )
+        
+        # Comparison functionality
+        compare_ids = pending_edited[pending_edited["Compare"]]["ID"].tolist()
+        
+        if compare_ids:
+            st.markdown("---")
+            st.markdown("### 📑 Historical Comparison")
             
-            display_columns = ["ID", "Link", "Followers", "Category", "Post price", "Avg View", "CPV", "Select", "Compare"]
-            display_columns = [col for col in display_columns if col in pending_display.columns]
+            # Use tabs for each influencer comparison
+            comparison_tabs = st.tabs([f"📈 {inf_id}" for inf_id in compare_ids])
             
-            pending_edited = st.data_editor(
-                pending_display[display_columns],
-                use_container_width=True,
-                column_config={
-                    "Select": st.column_config.CheckboxColumn("Include in Export", default=True),
-                    "Compare": st.column_config.CheckboxColumn("Compare History", default=False),
-                    "Link": st.column_config.LinkColumn("Instagram Profile", display_text="View Profile")
-                },
-                key=f"pending_editor_{current_file_hash[:8]}",
-                hide_index=True
-            )
-            
-            # Comparison functionality
-            compare_ids = pending_edited[pending_edited["Compare"]]["ID"].tolist()
-            
-            if compare_ids:
-                st.markdown("---")
-                st.markdown("### 📑 Historical Comparison")
-                
-                # Use tabs for each influencer comparison
-                comparison_tabs = st.tabs([f"📈 {inf_id}" for inf_id in compare_ids])
-                
-                for i, influencer_id in enumerate(compare_ids):
-                    with comparison_tabs[i]:
-                        current_data = st.session_state.pending_df[st.session_state.pending_df["ID"] == influencer_id].iloc[0]
-                        historical_data = st.session_state.master_df[st.session_state.master_df["ID"] == influencer_id]
+            for i, influencer_id in enumerate(compare_ids):
+                with comparison_tabs[i]:
+                    current_data = st.session_state.pending_df[st.session_state.pending_df["ID"] == influencer_id].iloc[0]
+                    historical_data = st.session_state.master_df[st.session_state.master_df["ID"] == influencer_id]
+                    
+                    if not historical_data.empty:
+                        historical_data = historical_data.sort_values("Publication date(Miladi)")
                         
-                        if not historical_data.empty:
-                            historical_data = historical_data.sort_values("Publication date(Miladi)")
-                            
-                            # Create comparison charts - EACH CHART IN 100% WIDTH
-                            # Post Price Chart
-                            if "Post Price" in historical_data.columns and historical_data["Post Price"].notna().any():
-                                fig_price = go.Figure()
-                                fig_price.add_trace(go.Scatter(
-                                    x=historical_data["Publication date(Miladi)"],
-                                    y=historical_data["Post Price"],
-                                    mode='lines+markers',
-                                    name='Post Price',
-                                    line=dict(color='#004aff', width=1)
-                                ))
-                                fig_price.update_layout(
-                                    title="📈 Post Price Trend", 
-                                    height=400,
-                                    xaxis_title="Publication Date",
-                                    yaxis_title="Post Price",
-                                    showlegend=True
-                                )
-                                st.plotly_chart(fig_price, use_container_width=True)
-                            
-                            # Followers Chart
-                            if "Follower" in historical_data.columns and historical_data["Follower"].notna().any():
-                                fig_followers = go.Figure()
-                                fig_followers.add_trace(go.Scatter(
-                                    x=historical_data["Publication date(Miladi)"],
-                                    y=historical_data["Follower"],
-                                    mode='lines+markers',
-                                    name='Followers',
-                                    line=dict(color='#00cc96', width=1)
-                                ))
-                                fig_followers.update_layout(
-                                    title="📊 Followers Trend", 
-                                    height=400,
-                                    xaxis_title="Publication Date",
-                                    yaxis_title="Followers",
-                                    showlegend=True
-                                )
-                                st.plotly_chart(fig_followers, use_container_width=True)
-                            
-                            # Average Views Chart
-                            if "Avg View" in historical_data.columns and historical_data["Avg View"].notna().any():
-                                fig_views = go.Figure()
-                                fig_views.add_trace(go.Scatter(
-                                    x=historical_data["Publication date(Miladi)"],
-                                    y=historical_data["Avg View"],
-                                    mode='lines+markers',
-                                    name='Average Views',
-                                    line=dict(color='#ff7f0e', width=3)
-                                ))
-                                fig_views.update_layout(
-                                    title="👀 Average Views Trend", 
-                                    height=400,
-                                    xaxis_title="Publication Date",
-                                    yaxis_title="Average Views",
-                                    showlegend=True
-                                )
-                                st.plotly_chart(fig_views, use_container_width=True)
-                            
-                            # CPV Chart
-                            if "CPV" in historical_data.columns and historical_data["CPV"].notna().any():
-                                fig_cpv = go.Figure()
-                                fig_cpv.add_trace(go.Scatter(
-                                    x=historical_data["Publication date(Miladi)"],
-                                    y=historical_data["CPV"],
-                                    mode='lines+markers',
-                                    name='CPV',
-                                    line=dict(color='#d62728', width=1)
-                                ))
-                                fig_cpv.update_layout(
-                                    title="💰 CPV Trend", 
-                                    height=400,
-                                    xaxis_title="Publication Date",
-                                    yaxis_title="CPV",
-                                    showlegend=True
-                                )
-                                st.plotly_chart(fig_cpv, use_container_width=True)
-                            
-                            # Current values table
-                            st.markdown("### 📋 Current Metrics")
-                            current_values_data = {
-                                "Metric": ["Post Price", "Followers", "Avg View", "CPV", "Category", "IER", "Avg Like", "Avg Comments"],
-                                "Value": [
-                                    format_number(current_data.get("Post price", "N/A")),
-                                    format_number(current_data.get("Followers", "N/A")),
-                                    format_number(current_data.get("Avg View", "N/A")),
-                                    format_number(current_data.get("CPV", "N/A")),
-                                    current_data.get("Category", "N/A"),
-                                    format_number(current_data.get("IER", "N/A")),
-                                    format_number(current_data.get("Avg like", "N/A")),
-                                    format_number(current_data.get("Avg comments", "N/A"))
-                                ]
-                            }
-                            current_values_df = pd.DataFrame(current_values_data)
-                            st.dataframe(current_values_df, use_container_width=True, hide_index=True)
-                            
-                            # Historical data preview - FIXED KEYERROR
-                            st.markdown("### 📊 Historical Data Preview")
-                            
-                            # Safely select columns that exist
-                            available_columns = ["Publication date(Miladi)", "Post Price", "Follower"]
-                            
-                            # Add optional columns only if they exist
-                            optional_columns = ["Avg View", "CPV", "Category"]
-                            for col in optional_columns:
-                                if col in historical_data.columns:
-                                    available_columns.append(col)
-                            
-                            historical_display = historical_data[available_columns].copy()
-                            
-                            # Format numeric columns
-                            numeric_cols = ["Post Price", "Follower", "Avg View", "CPV"]
-                            for col in numeric_cols:
-                                if col in historical_display.columns:
-                                    historical_display[col] = historical_display[col].apply(format_number)
-                            
-                            st.dataframe(historical_display, use_container_width=True, hide_index=True)
-                            
-                        else:
-                            st.info("ℹ️ No historical data available for this influencer.")
-                            
-                            # Show current values even if no historical data
-                            st.markdown("### 📋 Current Metrics")
-                            current_values_data = {
-                                "Metric": ["Post Price", "Followers", "Avg View", "CPV", "Category"],
-                                "Value": [
-                                    format_number(current_data.get("Post price", "N/A")),
-                                    format_number(current_data.get("Followers", "N/A")),
-                                    format_number(current_data.get("Avg View", "N/A")),
-                                    format_number(current_data.get("CPV", "N/A")),
-                                    current_data.get("Category", "N/A")
-                                ]
-                            }
-                            current_values_df = pd.DataFrame(current_values_data)
-                            st.dataframe(current_values_df, use_container_width=True, hide_index=True)
-            
-            # Download functionality
-            selected_pending = pending_edited[pending_edited["Select"]].copy()
-            
-            if not selected_pending.empty:
-                st.markdown("---")
-                st.markdown("### 📥 Export Selected Influencers")
-                
-                col1, col2 = st.columns([1, 2])
-                
-                with col1:
-                    if st.button("👁️ Preview Selection", use_container_width=True):
-                        st.session_state.show_preview = True
-                
-                if st.session_state.get('show_preview', False):
-                    with st.expander("📋 Selected Influencers Preview", expanded=True):
-                        preview_columns = ["ID", "Link", "Followers", "Category", "Post price"]
-                        preview_columns = [col for col in preview_columns if col in selected_pending.columns]
+                        # Create comparison charts - EACH CHART IN 100% WIDTH
+                        # Post Price Chart
+                        if "Post Price" in historical_data.columns and historical_data["Post Price"].notna().any():
+                            fig_price = go.Figure()
+                            fig_price.add_trace(go.Scatter(
+                                x=historical_data["Publication date(Miladi)"],
+                                y=historical_data["Post Price"],
+                                mode='lines+markers',
+                                name='Post Price',
+                                line=dict(color='#004aff', width=1)
+                            ))
+                            fig_price.update_layout(
+                                title="📈 Post Price Trend", 
+                                height=400,
+                                xaxis_title="Publication Date",
+                                yaxis_title="Post Price",
+                                showlegend=True
+                            )
+                            st.plotly_chart(fig_price, use_container_width=True)
                         
-                        st.dataframe(selected_pending[preview_columns], 
-                                   use_container_width=True, height=300)
+                        # Followers Chart
+                        if "Follower" in historical_data.columns and historical_data["Follower"].notna().any():
+                            fig_followers = go.Figure()
+                            fig_followers.add_trace(go.Scatter(
+                                x=historical_data["Publication date(Miladi)"],
+                                y=historical_data["Follower"],
+                                mode='lines+markers',
+                                name='Followers',
+                                line=dict(color='#00cc96', width=1)
+                            ))
+                            fig_followers.update_layout(
+                                title="📊 Followers Trend", 
+                                height=400,
+                                xaxis_title="Publication Date",
+                                yaxis_title="Followers",
+                                showlegend=True
+                            )
+                            st.plotly_chart(fig_followers, use_container_width=True)
                         
-                        if st.button("Close Preview", key="close_preview"):
-                            st.session_state.show_preview = False
-                            st.rerun()
-                
-                with col2:
-                    # Prepare download data
-                    download_df = pd.DataFrame()
-                    download_df["ID"] = selected_pending["ID"]
-                    
-                    # Add required columns structure
-                    for i in range(4):
-                        download_df[f"col_{i+1}"] = ""
-                    
-                    download_df["Page link"] = selected_pending["Link"]
-                    download_df["Category"] = selected_pending["Category"]
-                    download_df["col_5"] = ""
-
-                    # Map original numeric values
-                    follower_mapping = dict(zip(st.session_state.pending_df["ID"], st.session_state.pending_df["Followers"]))
-                    download_df["Follower"] = download_df["ID"].map(follower_mapping)
-                    
-                    # Add other metrics with empty column between Ave Comment and Post Price
-                    metric_mappings = {
-                        "ER": "IER",
-                        "Ave Like": "Avg like", 
-                        "Ave Comment": "Avg comments",
-                        "COL_6": "",  # This is the new empty column
-                        "Post Price": "Post price"
-                    }
-
-                    for target_col, source_col in metric_mappings.items():
-                        if source_col in st.session_state.new_df.columns and source_col != "":  # For actual data columns
-                            mapping = dict(zip(st.session_state.new_df["ID"], st.session_state.new_df[source_col]))
-                            download_df[target_col] = download_df["ID"].map(mapping)
-                        else:
-                            # For empty columns, just add empty strings
-                            download_df[target_col] = ""
-                    
-                    # Create download button
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        download_df.to_excel(writer, index=False, sheet_name="Selected Influencers")
-                    output.seek(0)
-                    
-                    st.download_button(
-                        label="📥 Download Excel File",
-                        data=output,
-                        file_name="selected_influencers.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
-                        type="primary"
-                    )
-    
-    elif active_tab == 1:  # Rejected tab
-        with tabs[1]:
-            st.dataframe(
-                st.session_state.rejected_df[["ID", "Comment", "Link"]],
-                use_container_width=True,
-                column_config={
-                    "Link": st.column_config.LinkColumn("View Profile", display_text="View Profile")
-                },
-                hide_index=True
-            )
-    
-    else:  # Unknown tab (active_tab == 2)
-        with tabs[2]:
-            unknown_edited = st.data_editor(
-                st.session_state.unknown_df[["ID", "Link", "Comment", "Status", "Select_Sheet"]],
-                use_container_width=True,
-                column_config={
-                    "Status": st.column_config.SelectboxColumn(
-                        "Status",
-                        help="Select the status for this influencer",
-                        options=["Approved", "Rejected"],
-                        required=True
-                    ),
-                    "Select_Sheet": st.column_config.CheckboxColumn("Add to Google Sheet"),
-                    "Link": st.column_config.LinkColumn("Instagram Profile", display_text="View Profile"),
-                    "Comment": st.column_config.TextColumn("Comment", default="No comment yet")
-                },
-                key=f"unknown_editor_{current_file_hash[:8]}"
-            )
+                        # Average Views Chart
+                        if "Avg View" in historical_data.columns and historical_data["Avg View"].notna().any():
+                            fig_views = go.Figure()
+                            fig_views.add_trace(go.Scatter(
+                                x=historical_data["Publication date(Miladi)"],
+                                y=historical_data["Avg View"],
+                                mode='lines+markers',
+                                name='Average Views',
+                                line=dict(color='#ff7f0e', width=3)
+                            ))
+                            fig_views.update_layout(
+                                title="👀 Average Views Trend", 
+                                height=400,
+                                xaxis_title="Publication Date",
+                                yaxis_title="Average Views",
+                                showlegend=True
+                            )
+                            st.plotly_chart(fig_views, use_container_width=True)
+                        
+                        # CPV Chart
+                        if "CPV" in historical_data.columns and historical_data["CPV"].notna().any():
+                            fig_cpv = go.Figure()
+                            fig_cpv.add_trace(go.Scatter(
+                                x=historical_data["Publication date(Miladi)"],
+                                y=historical_data["CPV"],
+                                mode='lines+markers',
+                                name='CPV',
+                                line=dict(color='#d62728', width=1)
+                            ))
+                            fig_cpv.update_layout(
+                                title="💰 CPV Trend", 
+                                height=400,
+                                xaxis_title="Publication Date",
+                                yaxis_title="CPV",
+                                showlegend=True
+                            )
+                            st.plotly_chart(fig_cpv, use_container_width=True)
+                        
+                        # Current values table
+                        st.markdown("### 📋 Current Metrics")
+                        current_values_data = {
+                            "Metric": ["Post Price", "Followers", "Avg View", "CPV", "Category", "IER", "Avg Like", "Avg Comments"],
+                            "Value": [
+                                format_number(current_data.get("Post price", "N/A")),
+                                format_number(current_data.get("Followers", "N/A")),
+                                format_number(current_data.get("Avg View", "N/A")),
+                                format_number(current_data.get("CPV", "N/A")),
+                                current_data.get("Category", "N/A"),
+                                format_number(current_data.get("IER", "N/A")),
+                                format_number(current_data.get("Avg like", "N/A")),
+                                format_number(current_data.get("Avg comments", "N/A"))
+                            ]
+                        }
+                        current_values_df = pd.DataFrame(current_values_data)
+                        st.dataframe(current_values_df, use_container_width=True, hide_index=True)
+                        
+                        # Historical data preview - FIXED KEYERROR
+                        st.markdown("### 📊 Historical Data Preview")
+                        
+                        # Safely select columns that exist
+                        available_columns = ["Publication date(Miladi)", "Post Price", "Follower"]
+                        
+                        # Add optional columns only if they exist
+                        optional_columns = ["Avg View", "CPV", "Category"]
+                        for col in optional_columns:
+                            if col in historical_data.columns:
+                                available_columns.append(col)
+                        
+                        historical_display = historical_data[available_columns].copy()
+                        
+                        # Format numeric columns
+                        numeric_cols = ["Post Price", "Follower", "Avg View", "CPV"]
+                        for col in numeric_cols:
+                            if col in historical_display.columns:
+                                historical_display[col] = historical_display[col].apply(format_number)
+                        
+                        st.dataframe(historical_display, use_container_width=True, hide_index=True)
+                        
+                    else:
+                        st.info("ℹ️ No historical data available for this influencer.")
+                        
+                        # Show current values even if no historical data
+                        st.markdown("### 📋 Current Metrics")
+                        current_values_data = {
+                            "Metric": ["Post Price", "Followers", "Avg View", "CPV", "Category"],
+                            "Value": [
+                                format_number(current_data.get("Post price", "N/A")),
+                                format_number(current_data.get("Followers", "N/A")),
+                                format_number(current_data.get("Avg View", "N/A")),
+                                format_number(current_data.get("CPV", "N/A")),
+                                current_data.get("Category", "N/A")
+                            ]
+                        }
+                        current_values_df = pd.DataFrame(current_values_data)
+                        st.dataframe(current_values_df, use_container_width=True, hide_index=True)
+        
+        # Download functionality
+        selected_pending = pending_edited[pending_edited["Select"]].copy()
+        
+        if not selected_pending.empty:
+            st.markdown("---")
+            st.markdown("### 📥 Export Selected Influencers")
             
-            if st.button("☁️ Add Selected to Google Sheet", use_container_width=True, type="primary"):
-                to_add = unknown_edited[unknown_edited["Select_Sheet"]].copy()
-                if not to_add.empty:
-                    to_add["Credibility"] = to_add["Status"].map({"Approved": "True", "Rejected": "False"})
-                    values_to_append = to_add[["ID", "Comment", "Credibility"]].values.tolist()
+            col1, col2 = st.columns([1, 2])
+            
+            with col1:
+                if st.button("👁️ Preview Selection", use_container_width=True):
+                    st.session_state.show_preview = True
+            
+            if st.session_state.get('show_preview', False):
+                with st.expander("📋 Selected Influencers Preview", expanded=True):
+                    preview_columns = ["ID", "Link", "Followers", "Category", "Post price"]
+                    preview_columns = [col for col in preview_columns if col in selected_pending.columns]
                     
-                    try:
-                        st.session_state.ws_inf.append_rows(values_to_append, value_input_option="USER_ENTERED")
-                        st.success(f"✔️ {len(values_to_append)} influencer(s) added successfully!")
-                        # Set flag to refresh data in other pages
-                        st.session_state.sheet_updated = True
-                        st.cache_data.clear()
+                    st.dataframe(selected_pending[preview_columns], 
+                               use_container_width=True, height=300)
+                    
+                    if st.button("Close Preview", key="close_preview"):
+                        st.session_state.show_preview = False
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Failed to update Google Sheet: {e}")
+            
+            with col2:
+                # Prepare download data
+                download_df = pd.DataFrame()
+                download_df["ID"] = selected_pending["ID"]
+                
+                # Add required columns structure
+                for i in range(4):
+                    download_df[f"col_{i+1}"] = ""
+                
+                download_df["Page link"] = selected_pending["Link"]
+                download_df["Category"] = selected_pending["Category"]
+                download_df["col_5"] = ""
+
+                # Map original numeric values
+                follower_mapping = dict(zip(st.session_state.pending_df["ID"], st.session_state.pending_df["Followers"]))
+                download_df["Follower"] = download_df["ID"].map(follower_mapping)
+                
+                # Add other metrics with empty column between Ave Comment and Post Price
+                metric_mappings = {
+                    "ER": "IER",
+                    "Ave Like": "Avg like", 
+                    "Ave Comment": "Avg comments",
+                    "COL_6": "",  # This is the new empty column
+                    "Post Price": "Post price"
+                }
+
+                for target_col, source_col in metric_mappings.items():
+                    if source_col in st.session_state.new_df.columns and source_col != "":  # For actual data columns
+                        mapping = dict(zip(st.session_state.new_df["ID"], st.session_state.new_df[source_col]))
+                        download_df[target_col] = download_df["ID"].map(mapping)
+                    else:
+                        # For empty columns, just add empty strings
+                        download_df[target_col] = ""
+                
+                # Create download button
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    download_df.to_excel(writer, index=False, sheet_name="Selected Influencers")
+                output.seek(0)
+                
+                st.download_button(
+                    label="📥 Download Excel File",
+                    data=output,
+                    file_name="selected_influencers.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    type="primary"
+                )
+    
+    with tab2:
+        st.dataframe(
+            st.session_state.rejected_df[["ID", "Comment", "Link"]],
+            use_container_width=True,
+            column_config={
+                "Link": st.column_config.LinkColumn("View Profile", display_text="View Profile")
+            },
+            hide_index=True
+        )
+    
+    with tab3:
+        
+        unknown_edited = st.data_editor(
+            st.session_state.unknown_df[["ID", "Link", "Comment", "Status", "Select_Sheet"]],
+            use_container_width=True,
+            column_config={
+                "Status": st.column_config.SelectboxColumn(
+                    "Status",
+                    help="Select the status for this influencer",
+                    options=["Approved", "Rejected"],
+                    required=True
+                ),
+                "Select_Sheet": st.column_config.CheckboxColumn("Add to Google Sheet"),
+                "Link": st.column_config.LinkColumn("Instagram Profile", display_text="View Profile"),
+                "Comment": st.column_config.TextColumn("Comment", default="No comment yet")
+            },
+            key=f"unknown_editor_{current_file_hash[:8]}"
+        )
+        
+        if st.button("☁️ Add Selected to Google Sheet", use_container_width=True, type="primary"):
+            to_add = unknown_edited[unknown_edited["Select_Sheet"]].copy()
+            if not to_add.empty:
+                to_add["Credibility"] = to_add["Status"].map({"Approved": "True", "Rejected": "False"})
+                values_to_append = to_add[["ID", "Comment", "Credibility"]].values.tolist()
+                
+                try:
+                    st.session_state.ws_inf.append_rows(values_to_append, value_input_option="USER_ENTERED")
+                    st.success(f"✔️ {len(values_to_append)} influencer(s) added successfully!")
+                    # Set flag to refresh data in other pages
+                    st.session_state.sheet_updated = True
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Failed to update Google Sheet: {e}")
 
 # --- Empty State ---
 else:
